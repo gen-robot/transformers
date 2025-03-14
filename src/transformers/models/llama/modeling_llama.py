@@ -614,6 +614,7 @@ class LlamaSdpaAttention(LlamaAttention):
         output_attentions: bool = False,
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
+        use_bidirectional_attn: bool = False,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
@@ -716,11 +717,15 @@ class LlamaSdpaAttention(LlamaAttention):
         #
         # Trick: To get this mask, we just take the last row of the old `causal_mask` and duplicate it all the way through to get the new mask. You can see that this trick
         # works by looking at the matrices above.
-        if causal_mask is not None:
-            D = causal_mask.shape[-1]
-            last_row = causal_mask[:, :, -1, :].clone()
-            new_mask = last_row.unsqueeze(2).expand(-1, -1, D, -1)
-            causal_mask = new_mask
+        if not use_bidirectional_attn:
+            is_causal = causal_mask is None and q_len > 1
+        else:
+            is_causal = False
+            if causal_mask is not None:
+                D = causal_mask.shape[-1]
+                last_row = causal_mask[:, :, -1, :].clone()
+                new_mask = last_row.unsqueeze(2).expand(-1, -1, D, -1)
+                causal_mask = new_mask
 
         attn_output = torch.nn.functional.scaled_dot_product_attention(
             query_states,
@@ -728,7 +733,7 @@ class LlamaSdpaAttention(LlamaAttention):
             value_states,
             attn_mask=causal_mask,
             dropout_p=self.attention_dropout if self.training else 0.0,
-            is_causal=False,
+            is_causal=is_causal,
         )
 
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -756,6 +761,11 @@ class LlamaDecoderLayer(nn.Module):
         self.mlp = LlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+        self.use_parallel_decoding = False
+
+    def enable_parallel_decoding(self):
+        self.use_parallel_decoding = True
 
     def forward(
         self,
@@ -800,6 +810,7 @@ class LlamaDecoderLayer(nn.Module):
             output_attentions=output_attentions,
             use_cache=use_cache,
             cache_position=cache_position,
+            use_bidirectional_attn=self.use_parallel_decoding,
             **kwargs,
         )
         hidden_states = residual + hidden_states
@@ -976,6 +987,7 @@ class LlamaModel(LlamaPreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
+        self._attn_implementation = config._attn_implementation
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList(
             [LlamaDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
@@ -1180,6 +1192,9 @@ class LlamaModel(LlamaPreTrainedModel):
 
         return causal_mask
 
+    def enable_parallel_decoding(self):
+        for layer in self.layers:
+            layer.enable_parallel_decoding()
 
 class LlamaForCausalLM(LlamaPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
