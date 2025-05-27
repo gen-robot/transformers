@@ -78,7 +78,7 @@ class RobertaModel(BertModel):
     super().__init__(config)
     self.embeddings = RobertaEmbeddings(config)
 
-      
+
 # The model heads now only need to redefine the model inside to `RobertaModel`
 class RobertaForMaskedLM(BertForMaskedLM):
   def __init__(self, config):
@@ -243,13 +243,7 @@ class Olmo2Attention(OlmoAttention):
 
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
-            if self.config._attn_implementation == "sdpa" and kwargs.get("output_attentions", False):
-                logger.warning_once(
-                    "`torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to "
-                    'eager attention. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
-                )
-            else:
-                attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
+            attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
         attn_output, attn_weights = attention_interface(
             self,
@@ -546,7 +540,7 @@ This makes it very easy to switch decorators and makes it explicit that the only
 
 ## Docstring variables
 
-If an object defined in both the modular and modeling file from which it inherits, the modular definition has precedence unless for assignments containing the pattern `DOCSTRING`. These variables are typically used in `MODEL_START_DOCSTRING` and `MODEL_INPUT_DOCSTRING` in the modeling files. They are big blocks of docstrings and the linter rewrites the names everywhere. For this reason, assignments containing the `DOCSTRING` variable always uses the definition found in the source file instead of the modular file.
+If an object defined in both the modular and modeling file from which it inherits, the modular definition has precedence unless for assignments containing the pattern `DOCSTRING`. These variables are typically used in `MODEL_START_DOCSTRING` and `MODEL_INPUT_DOCSTRING` in the modeling files. They are big blocks of docstrings and the linter rewrites the names everywhere. For this reason, assignments containing the `DOCSTRING` variable can use the definition found in the source file without copying the whole docstring, by simply setting the variable to `None` in the modular file.
 
 This is very useful if you need the variable reference somewhere but you don't want to clutter the modular file with docstrings which are always the same. The example code below allows you to automatically use the same docstrings from [Mistral](./model_doc/mistral) in [Starcoder2](./model_doc/starcoder2).
 
@@ -560,6 +554,8 @@ class Starcoder2Model(MistralModel):
     def forward(...)
         ...
 ```
+
+Setting the variable to anything other than `None` will override the docstring, so that you can customize the docstrings if needed.
 
 ## Special naming
 
@@ -586,7 +582,7 @@ We detected multiple prefix names when inheriting from transformers.models.llama
 If there are automatic dependencies with a prefix, but you want another one, explicitly rename the classes locally with a `pass` class as shown in the following.
 
 ```py
-class Emu3TextMLP(LlamaMLP):                                 
+class Emu3TextMLP(LlamaMLP):
     pass
 ```
 
